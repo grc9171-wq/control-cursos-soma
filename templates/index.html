@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fiscalización SOMA - Control de Capacitaciones</title>
+    <!-- Librería nativa para escaneo QR -->
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <style>
+        :root {
+            --bg-color: #f4f6f9;
+            --card-bg: #ffffff;
+            --text-color: #2c3e50;
+            --primary: #2563eb;
+            --verde: #16a34a;
+            --rojo: #dc2626;
+            --azul-pendiente: #0284c7;
+            --border-radius: 8px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-color); padding: 16px; }
+
+        .container { max-width: 650px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+
+        .card { background: var(--card-bg); border-radius: var(--border-radius); padding: 20px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+        h1 { font-size: 1.25rem; margin-bottom: 16px; text-align: center; color: #1e293b; }
+
+        .search-box { display: flex; gap: 8px; margin-bottom: 12px; }
+        .search-box input { flex: 1; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: var(--border-radius); font-size: 1rem; }
+        .btn { padding: 10px 16px; background: var(--primary); color: white; border: none; border-radius: var(--border-radius); font-weight: 600; cursor: pointer; }
+        .btn:hover { opacity: 0.9; }
+
+        .btn-qr { width: 100%; background: #475569; margin-bottom: 12px; }
+        #qr-reader { width: 100%; border-radius: var(--border-radius); overflow: hidden; margin-bottom: 12px; display: none; }
+
+        /* Estilos del Semáforo y Encabezado de Resultado */
+        .result-header { border-left: 6px solid #cbd5e1; display: none; margin-bottom: 16px; }
+        .result-header.VERDE { border-color: var(--verde); background: #f0fdf4; }
+        .result-header.ROJO { border-color: var(--rojo); background: #fef2f2; }
+
+        .worker-info { display: flex; justify-content: space-between; align-items: center; }
+        .worker-name { font-size: 1.1rem; font-weight: 700; }
+        .worker-dni { font-size: 0.875rem; color: #64748b; margin-top: 4px; }
+
+        .status-badge { padding: 6px 12px; border-radius: 9999px; font-weight: 800; font-size: 0.85rem; color: white; letter-spacing: 0.5px; }
+        .status-badge.VERDE { background-color: var(--verde); }
+        .status-badge.ROJO { background-color: var(--rojo); }
+
+        /* Tabla de Resultados */
+        .table-container { overflow-x: auto; display: none; }
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9rem; }
+        th, td { padding: 12px 10px; border-bottom: 1px solid #e2e8f0; }
+        th { background-color: #f8fafc; font-weight: 600; color: #475569; }
+
+        .tag-estado { padding: 4px 8px; border-radius: 4px; font-weight: 600; font-size: 0.75rem; display: inline-block; text-transform: uppercase; }
+        .tag-Aprobado { background: #dcfce7; color: #15803d; }
+        .tag-Pendiente { background: #e0f2fe; color: #0369a1; }
+        .tag-Vencido { background: #fee2e2; color: #b91c1c; }
+
+        .message-box { padding: 12px; border-radius: var(--border-radius); font-size: 0.9rem; text-align: center; display: none; }
+        .message-box.error { background: #fef2f2; color: var(--rojo); border: 1px solid #fecaca; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="card">
+        <h1>Fiscalización de Cursos SOMA</h1>
+
+        <button id="btn-toggle-qr" class="btn btn-qr">📷 Activar Escáner QR</button>
+        <div id="qr-reader"></div>
+
+        <div class="search-box">
+            <input type="text" id="input-dni" placeholder="Ingrese DNI (6 a 8 dígitos)" maxlength="8" pattern="\d*">
+            <button id="btn-buscar" class="btn">Buscar</button>
+        </div>
+
+        <div id="msg-box" class="message-box"></div>
+    </div>
+
+    <!-- Contenedor del Encabezado (Nombre, DNI, Semáforo) -->
+    <div id="card-resultado" class="card result-header">
+        <div class="worker-info">
+            <div>
+                <div id="txt-nombre" class="worker-name"></div>
+                <div id="txt-dni" class="worker-dni"></div>
+            </div>
+            <div id="badge-semaforo" class="status-badge"></div>
+        </div>
+    </div>
+
+    <!-- Contenedor de la Tabla de Cursos -->
+    <div id="card-tabla" class="card table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Curso / Capacitación</th>
+                    <th>Fecha/Mes</th>
+                    <th>Estado</th>
+                </tr>
+            </thead>
+            <tbody id="tbody-cursos"></tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const inputDni = document.getElementById('input-dni');
+    const btnBuscar = document.getElementById('btn-buscar');
+    const btnToggleQr = document.getElementById('btn-toggle-qr');
+    const qrReaderDiv = document.getElementById('qr-reader');
+    const msgBox = document.getElementById('msg-box');
+
+    const cardResultado = document.getElementById('card-resultado');
+    const cardTabla = document.getElementById('card-tabla');
+    const txtNombre = document.getElementById('txt-nombre');
+    const txtDni = document.getElementById('txt-dni');
+    const badgeSemaforo = document.getElementById('badge-semaforo');
+    const tbodyCursos = document.getElementById('tbody-cursos');
+
+    let html5QrCode = null;
+
+    // --- BÚSQUEDA MANUAL ---
+    btnBuscar.addEventListener('click', () => ejecutarBusqueda(inputDni.value));
+    inputDni.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') ejecutarBusqueda(inputDni.value);
+    });
+
+    // --- ESCÁNER QR ---
+    btnToggleQr.addEventListener('click', () => {
+        if (qrReaderDiv.style.display === 'none' || qrReaderDiv.style.display === '') {
+            qrReaderDiv.style.display = 'block';
+            iniciarEscaner();
+        } else {
+            detenerEscaner();
+        }
+    });
+
+    function iniciarEscaner() {
+        html5QrCode = new Html5Qrcode("qr-reader");
+        html5QrCode.start(
+            { facingMode: "environment" },
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            (decodedText) => {
+                // Se asume que el QR contiene directamente el DNI o texto que incluye el DNI
+                const match = decodedText.match(/\b\d{6,8}\b/);
+                if (match) {
+                    inputDni.value = match[0];
+                    detenerEscaner();
+                    ejecutarBusqueda(match[0]);
+                }
+            },
+            () => {} // Ignorar errores de lectura continuos
+        ).catch(err => {
+            mostrarMensaje("No se pudo acceder a la cámara.", "error");
+            detenerEscaner();
+        });
+    }
+
+    function detenerEscaner() {
+        if (html5QrCode && html5QrCode.isScanning) {
+            html5QrCode.stop().then(() => {
+                qrReaderDiv.style.display = 'none';
+            }).catch(() => {
+                qrReaderDiv.style.display = 'none';
+            });
+        } else {
+            qrReaderDiv.style.display = 'none';
+        }
+    }
+
+    // --- LÓGICA DE CONSULTA Y RENDERIZADO SEGURO ---
+    async function ejecutarBusqueda(dni) {
+        limpiarPantalla();
+
+        if (!dni || !/^\d{6,8}$/.test(dni.trim())) {
+            mostrarMensaje("Ingrese un número de DNI válido (6 a 8 dígitos).", "error");
+            return;
+        }
+
+        try {
+            const response = await fetch('/buscar', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ dni: dni.trim() })
+            });
+
+            const data = await response.json();
+
+            if (response.status === 200) {
+                renderizarResultados(data);
+            } else {
+                mostrarMensaje(data.message || "No se encontraron registros.", "error");
+            }
+        } catch (error) {
+            mostrarMensaje("Error de conexión con el servidor.", "error");
+        }
+    }
+
+    // MANIPULACIÓN SEGURA DEL DOM (Prevención XSS: Sin uso de innerHTML en datos dinámicos)
+    function renderizarResultados(data) {
+        const { trabajador, cursos } = data;
+
+        // 1. Asignar Encabezado
+        txtNombre.textContent = trabajador.nombre;
+        txtDni.textContent = `DNI: ${trabajador.dni}`;
+        badgeSemaforo.textContent = trabajador.dictamen;
+
+        // Clases del Semáforo
+        cardResultado.className = `card result-header ${trabajador.semaforo}`;
+        badgeSemaforo.className = `status-badge ${trabajador.semaforo}`;
+        cardResultado.style.display = 'block';
+
+        // 2. Poblar Tabla
+        tbodyCursos.textContent = ''; // Limpieza segura de filas anteriores
+
+        cursos.forEach(item => {
+            const tr = document.createElement('tr');
+
+            const tdCurso = document.createElement('td');
+            tdCurso.textContent = item.curso;
+
+            const tdFecha = document.createElement('td');
+            tdFecha.textContent = item.fecha;
+
+            const tdEstado = document.createElement('td');
+            const spanEstado = document.createElement('span');
+            spanEstado.textContent = item.estado;
+            spanEstado.className = `tag-estado tag-${item.estado}`;
+            tdEstado.appendChild(spanEstado);
+
+            tr.appendChild(tdCurso);
+            tr.appendChild(tdFecha);
+            tr.appendChild(tdEstado);
+
+            tbodyCursos.appendChild(tr);
+        });
+
+        cardTabla.style.display = 'block';
+    }
+
+    function mostrarMensaje(texto, tipo) {
+        msgBox.textContent = texto;
+        msgBox.className = `message-box ${tipo}`;
+        msgBox.style.display = 'block';
+    }
+
+    function limpiarPantalla() {
+        msgBox.style.display = 'none';
+        cardResultado.style.display = 'none';
+        cardTabla.style.display = 'none';
+        tbodyCursos.textContent = '';
+    }
+});
+</script>
+</body>
+</html>
